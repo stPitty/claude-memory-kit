@@ -11,7 +11,8 @@ from pathlib import Path
 from . import config, frontmatter, gitops
 
 MOUNTS_DIR = config.HOME / ".claude" / "memory-mounts"
-DEFAULT = {"readOnly": True, "autoPull": True, "only": [], "maxEntries": 80, "maxDepth": 3, "subdir": ""}
+DEFAULT = {"readOnly": True, "autoPull": True, "only": [], "maxEntries": 80, "maxDepth": 3, "subdir": "",
+           "descMax": 110, "exclude": [], "collapse": [], "focus": True}
 
 
 def all_mounts():
@@ -109,9 +110,23 @@ def _desc(p: Path):
     return ""
 
 
-def render_tree(m):
-    """Depth/entry-limited tree of Markdown files with one-line descriptions."""
+def _md_count(d: Path):
+    return sum(1 for p in d.rglob("*.md") if not any(x.startswith(".") for x in p.relative_to(d).parts))
+
+
+def _match_any(rel: str, globs):
+    return any(fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(rel + "/", g) for g in globs or [])
+
+
+def render_tree(m, slug=None):
+    """Depth/entry-limited tree of Markdown files with one-line descriptions.
+    exclude: globs (relative to the mount root) hidden entirely.
+    collapse: globs of directories shown as one line with a file count — unless `focus` is on and the dir name == current project slug."""
     base = root(m)
+    desc_max = int(m.get("descMax", 110))
+    excl = m.get("exclude") or []
+    coll = m.get("collapse") or []
+    focus = bool(m.get("focus", True))
     lines = [f"{base}/"]
     budget = {"n": int(m.get("maxEntries", 80)), "skipped": 0, "other": 0}
     max_depth = int(m.get("maxDepth", 3))
@@ -123,7 +138,8 @@ def render_tree(m):
             entries = sorted(d.iterdir(), key=lambda p: (p.is_dir(), p.name.lower()))
         except Exception:  # noqa: BLE001
             return
-        entries = [e for e in entries if not e.name.startswith(".") and e.name not in ("node_modules",)]
+        entries = [e for e in entries if not e.name.startswith(".") and e.name not in ("node_modules",)
+                   and not _match_any(str(e.relative_to(base)), excl)]
         files = [e for e in entries if e.is_file()]
         mds = [e for e in files if e.suffix.lower() in (".md", ".mdx", ".txt")]
         budget["other"] += len(files) - len(mds)
@@ -141,8 +157,14 @@ def render_tree(m):
             budget["n"] -= 1
             if kind == "f":
                 d_ = _desc(p)
+                if len(d_) > desc_max:
+                    d_ = d_[: desc_max - 1].rstrip() + "…"
                 lines.append(f"{prefix}{branch}{p.name}" + (f" — {d_}" if d_ else ""))
             else:
+                relp = str(p.relative_to(base))
+                if _match_any(relp, coll) and not (focus and slug and p.name == slug):
+                    lines.append(f"{prefix}{branch}{p.name}/ ({_md_count(p)} md files, collapsed — open when working on '{p.name}')")
+                    continue
                 if depth >= max_depth:
                     lines.append(f"{prefix}{branch}{p.name}/ …")
                     continue
@@ -180,7 +202,7 @@ def compile_section(slug, do_pull=False):
         if pulled and pulled.startswith("pull failed"):
             notes.append(f"mount '{m['name']}': {pulled}")
         parts.append(f"<mount {' '.join(attrs)}>")
-        parts.append(render_tree(m))
+        parts.append(render_tree(m, slug))
         parts.append("</mount>")
     parts.append("</shared_memory>")
     return "\n".join(parts), notes
@@ -192,7 +214,7 @@ def _is_url(s):
     return s.startswith(("http://", "https://", "git@", "ssh://")) or (":" in s and not Path(s).expanduser().exists())
 
 
-def add(source, name=None, read_only=True, auto_pull=True, only=None, subdir=""):
+def add(source, name=None, read_only=True, auto_pull=True, only=None, subdir="", exclude=None, collapse=None):
     cfg = config.load()
     mounts = cfg.setdefault("mounts", [])
     if _is_url(source):
@@ -222,6 +244,10 @@ def add(source, name=None, read_only=True, auto_pull=True, only=None, subdir="")
         entry["only"] = only
     if subdir:
         entry["subdir"] = subdir
+    if exclude:
+        entry["exclude"] = exclude
+    if collapse:
+        entry["collapse"] = collapse
     mounts.append(entry)
     config.save(cfg)
     return entry
@@ -233,3 +259,19 @@ def remove(name):
     cfg["mounts"] = [m for m in cfg.get("mounts", []) if m["name"] != name]
     config.save(cfg)
     return len(cfg["mounts"]) < before
+
+
+def set_option(name, key, value):
+    import json as _json
+    cfg = config.load()
+    for m in cfg.get("mounts", []):
+        if m["name"] == name:
+            try:
+                value = _json.loads(value)
+            except Exception:  # noqa: BLE001
+                if "," in str(value):
+                    value = [x.strip() for x in str(value).split(",") if x.strip()]
+            m[key] = value
+            config.save(cfg)
+            return m
+    raise RuntimeError(f"no such mount: {name}")

@@ -182,9 +182,14 @@ def cmd_backup(a):
 def cmd_mount(a):
     if a.action == "add":
         only = [x.strip() for x in (a.only or "").split(",") if x.strip()]
-        e = mounts.add(a.source, name=a.name, read_only=not a.rw, auto_pull=not a.no_pull, only=only, subdir=a.subdir or "")
+        split = lambda v: [x.strip() for x in (v or "").split(",") if x.strip()]
+        e = mounts.add(a.source, name=a.name, read_only=not a.rw, auto_pull=not a.no_pull, only=only, subdir=a.subdir or "",
+                       exclude=split(a.exclude), collapse=split(a.collapse))
         print("mounted:", json.dumps(e, ensure_ascii=False))
-        print(mounts.render_tree(mounts.all_mounts()[-1]))
+        print(mounts.render_tree(mounts.all_mounts()[-1], config.project_slug(a.cwd)))
+    elif a.action == "set":
+        key, _, val = (a.name_or_kv or "").partition("=")
+        print(json.dumps(mounts.set_option(a.source, key, val), ensure_ascii=False))
     elif a.action == "rm":
         print("removed" if mounts.remove(a.source) else "no such mount")
     elif a.action == "pull":
@@ -201,7 +206,8 @@ def cmd_mount(a):
             print(f"{m['name']:<20} {mounts.repo_root(m)}  ro={m.get('readOnly', True)} pull={m.get('autoPull', True)} "
                   f"only={m.get('only') or '*'} rev={st['revision']} dirty={st['dirty']}")
             if a.tree:
-                print(mounts.render_tree(m))
+                t = mounts.render_tree(m, config.project_slug(a.cwd))
+                print(t); print(f"  (~{len(t.encode()) // 4} tokens for slug '{config.project_slug(a.cwd)}')")
 
 
 def main():
@@ -227,7 +233,10 @@ def main():
     p = sp.add_parser("config", help="show/set config"); p.add_argument("--set", help="dotted.key=value"); p.set_defaults(fn=cmd_config)
     p = sp.add_parser("sleeptime", help="configure reflection triggers"); p.add_argument("trigger", nargs="?"); p.add_argument("--step-count"); p.add_argument("--model"); p.set_defaults(fn=cmd_sleeptime)
     p = sp.add_parser("mount", help="shared/external memory repos: add | rm | pull | list")
-    p.add_argument("action", nargs="?", default="list", choices=["add", "rm", "pull", "list"]); p.add_argument("source", nargs="?")
+    p.add_argument("action", nargs="?", default="list", choices=["add", "rm", "pull", "list", "set"]); p.add_argument("source", nargs="?")
+    p.add_argument("name_or_kv", nargs="?", help="for set: key=value (e.g. collapse='reference/*', descMax=80, exclude='system,skills')")
+    p.add_argument("--exclude", help="comma-separated globs to hide"); p.add_argument("--collapse", help="comma-separated dir globs shown as one line unless it is the current project")
+    p.add_argument("--cwd")
     p.add_argument("--name"); p.add_argument("--rw", action="store_true", help="writable (default read-only)"); p.add_argument("--no-pull", action="store_true")
     p.add_argument("--only", help="comma-separated project slug globs where the mount is visible"); p.add_argument("--subdir"); p.add_argument("--tree", action="store_true")
     p.set_defaults(fn=cmd_mount)
