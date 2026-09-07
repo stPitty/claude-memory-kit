@@ -1,0 +1,19 @@
+{
+  "vault": "__VAULT__",
+  "stateDir": "~/.claude/memory-state",
+  "projectsDir": "~/.claude/projects",
+  "autocommit": true,
+  "reflection": {
+    "trigger": "compaction-event",
+    "stepCount": 25,
+    "model": "sonnet",
+    "maxTurns": 60,
+    "minNewMessages": 6,
+    "digestMaxBytes": 350000
+  },
+  "budget": {
+    "targetTokens": 20000,
+    "warnTokens": 30000,
+    "bytesPerToken": 4
+  }
+}

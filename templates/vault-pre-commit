@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# claude-memory-kit: validate the vault contract before every commit (Letta MemFS pre-commit analogue).
+MEMORYCTL="$HOME/.claude/memory-kit/bin/memoryctl"
+[ -x "$MEMORYCTL" ] || exit 0
+out="$(python3 "$MEMORYCTL" validate 2>&1)"; rc=$?
+if [ $rc -ne 0 ]; then
+  echo "memory contract violated — commit refused:" >&2
+  echo "$out" | grep '^\[error\]' >&2
+  echo "(fix the files, or bypass once with: git commit --no-verify)" >&2
+  exit 1
+fi
+exit 0

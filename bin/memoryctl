@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""memoryctl — manage the Claude Code memory vault from the shell (Letta `letta memory ...` analogue)."""
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+KIT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(KIT))
+from memkit import config, gitops, reflect, transcript, vault  # noqa: E402
+
+
+def cmd_status(a):
+    cfg = config.load()
+    v = config.vault()
+    print(f"vault:      {v}  ({'git' if gitops.is_repo() else 'NOT a git repo'})")
+    print(f"config:     {config.CONFIG_PATH}")
+    print(f"state:      {config.state_dir()}")
+    if gitops.is_repo():
+        print(f"revision:   {gitops.head()} ({gitops.commit_count()} commits), last {gitops.last_commit_date()}")
+        d = gitops.status_porcelain()
+        print(f"dirty:      {'no' if not d else str(len(d.splitlines())) + ' files'}")
+    rows, total = vault.token_report(a.cwd)
+    print(f"budget:     ~{total} tokens injected for cwd={a.cwd or os.getcwd()} (target {cfg['budget']['targetTokens']}, warn {cfg['budget']['warnTokens']})")
+    print(f"reflection: trigger={cfg['reflection']['trigger']} stepCount={cfg['reflection']['stepCount']} model={cfg['reflection']['model']}")
+    lr = vault.last_reflection()
+    print(f"last refl.: {lr or 'never'}")
+    rs = vault.recall_stats()
+    print(f"recall:     {rs['sessions']} sessions / {rs['user_messages']} user messages in {config.projects_dir()}")
+    issues = vault.validate()
+    errs = [i for i in issues if i[0] == "error"]
+    print(f"contract:   {len(errs)} errors, {len(issues) - len(errs)} warnings" + ("" if not issues else "  (memoryctl validate)"))
+    print("\n" + vault.render_tree(skip_root_files=False))
+
+
+def cmd_compile(a):
+    text, stats = vault.compile_context(a.cwd)
+    print(text)
+    print(f"\n# ~{stats['tokens']} tokens", file=sys.stderr)
+
+
+def cmd_tokens(a):
+    rows, total = vault.token_report(a.cwd)
+    if a.json:
+        print(json.dumps({"total_tokens": total, "files": [{"path": p, "tokens": t} for p, t in rows]}, indent=2))
+        return
+    w = max(len(p) for p, _ in rows) if rows else 10
+    for p, t in sorted(rows, key=lambda r: -r[1]):
+        print(f"{t:>7}  {p}")
+    print(f"{total:>7}  TOTAL (target {config.load()['budget']['targetTokens']})")
+
+
+def cmd_validate(a):
+    issues = vault.validate(a.paths or None)
+    print(vault.format_issues(issues))
+    sys.exit(1 if any(i[0] == "error" for i in issues) else 0)
+
+
+def cmd_log(a):
+    for line in gitops.log_lines(a.n):
+        print(line)
+
+
+def cmd_diff(a):
+    rc, out, err = gitops.run(["diff", a.rev] if a.rev else ["diff"])
+    print(out or err)
+
+
+def cmd_commit(a):
+    h = gitops.commit_all(a.message)
+    print(f"committed {h}" if h else "nothing to commit")
+
+
+def cmd_reflect(a):
+    tp = a.transcript
+    sid = a.session
+    if a.latest or (not tp and not sid):
+        files = transcript.session_files(a.project)
+        if not files:
+            sys.exit("no transcripts found")
+        # skip our own running session if provided via env
+        tp = str(files[0])
+    if sid and not tp:
+        f = transcript.find_session(sid)
+        if not f:
+            sys.exit(f"session {sid} not found")
+        tp = str(f)
+    sid = sid or Path(tp).stem
+    if a.background:
+        reflect.trigger_async(tp, sid, a.cwd or os.getcwd(), a.reason)
+        print("reflection spawned in background; see memoryctl status / logs")
+        return
+    os.environ["CLAUDE_MEMORY_REFLECTING"] = "1"
+    res = reflect.run(tp, sid, a.cwd or os.getcwd(), a.reason, model=a.model, force=a.force)
+    print(json.dumps({k: v for k, v in res.items() if k != "summary"}, ensure_ascii=False, indent=2))
+    if res.get("summary"):
+        print("\n" + res["summary"])
+
+
+def cmd_digest(a):
+    f = transcript.find_session(a.session) if not os.path.exists(a.session) else Path(a.session)
+    if not f:
+        sys.exit("session not found")
+    text, stats = transcript.digest(f, from_line=a.from_line)
+    print(text)
+    print(f"\n# {json.dumps(stats)}", file=sys.stderr)
+
+
+def cmd_sessions(a):
+    for r in transcript.sessions(a.project, a.limit):
+        print(f"{r['session'][:8]}  {r['last']}  {r['user_messages']:>3} msgs  {r['project']}  | {r['first_prompt']}")
+
+
+def cmd_search(a):
+    roles = ("user", "assistant") if a.role == "all" else (a.role,)
+    hits = transcript.search(a.query, a.project, a.limit, roles, a.regex, a.since)
+    if not hits:
+        print("no hits")
+        return
+    for h in hits:
+        print(f"{h['session'][:8]}:{h['line']}  {h['ts']}  {h['role']:<9} {h['project']}\n    {h['snippet']}")
+
+
+def cmd_expand(a):
+    out = transcript.expand(a.session, a.line, a.before, a.after)
+    print(out or "session not found")
+
+
+def cmd_config(a):
+    cfg = config.load()
+    if a.set:
+        key, _, val = a.set.partition("=")
+        cur = cfg
+        ks = key.split(".")
+        for k in ks[:-1]:
+            cur = cur.setdefault(k, {})
+        try:
+            val = json.loads(val)
+        except Exception:  # noqa: BLE001
+            pass
+        cur[ks[-1]] = val
+        config.save(cfg)
+    print(json.dumps(cfg, indent=2, ensure_ascii=False))
+
+
+def cmd_sleeptime(a):
+    cfg = config.load()
+    if a.trigger:
+        if a.trigger not in ("off", "step-count", "compaction-event", "both"):
+            sys.exit("trigger must be one of: off | step-count | compaction-event | both")
+        cfg["reflection"]["trigger"] = a.trigger
+    if a.step_count:
+        cfg["reflection"]["stepCount"] = int(a.step_count)
+    if a.model:
+        cfg["reflection"]["model"] = a.model
+    config.save(cfg)
+    print(json.dumps(cfg["reflection"], indent=2))
+
+
+def cmd_open(a):
+    v = config.vault()
+    uri = f"obsidian://open?path={v}"
+    r = subprocess.run(["open", uri], capture_output=True)
+    if r.returncode != 0:
+        print(f"could not open Obsidian (is it installed? brew install --cask obsidian). Vault: {v}")
+    else:
+        print(f"opened {uri}")
+
+
+def cmd_backup(a):
+    import time
+    v = config.vault()
+    dest = Path(a.dest or (config.state_dir() / "backups")).expanduser()
+    dest.mkdir(parents=True, exist_ok=True)
+    out = dest / f"memory-{time.strftime('%Y%m%d-%H%M%S')}.tar.gz"
+    subprocess.run(["tar", "-czf", str(out), "-C", str(v.parent), v.name], check=True)
+    print(out)
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="memoryctl", description=__doc__)
+    sp = ap.add_subparsers(dest="cmd", required=True)
+    p = sp.add_parser("status", help="vault status, budget, reflection state, tree"); p.add_argument("--cwd"); p.set_defaults(fn=cmd_status)
+    p = sp.add_parser("compile", help="print the compiled memory context (what SessionStart injects)"); p.add_argument("--cwd"); p.set_defaults(fn=cmd_compile)
+    p = sp.add_parser("tokens", help="token budget per file"); p.add_argument("--cwd"); p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_tokens)
+    p = sp.add_parser("validate", help="check the vault contract"); p.add_argument("paths", nargs="*"); p.set_defaults(fn=cmd_validate)
+    p = sp.add_parser("log", help="git history of the memory"); p.add_argument("-n", type=int, default=20); p.set_defaults(fn=cmd_log)
+    p = sp.add_parser("diff", help="git diff of the vault"); p.add_argument("rev", nargs="?"); p.set_defaults(fn=cmd_diff)
+    p = sp.add_parser("commit", help="commit all pending vault changes"); p.add_argument("-m", "--message", default="chore(manual): commit via memoryctl"); p.set_defaults(fn=cmd_commit)
+    p = sp.add_parser("reflect", help="run a reflection over a transcript (default: latest session)")
+    p.add_argument("--transcript"); p.add_argument("--session"); p.add_argument("--latest", action="store_true"); p.add_argument("--project")
+    p.add_argument("--cwd"); p.add_argument("--reason", default="manual"); p.add_argument("--model"); p.add_argument("--force", action="store_true")
+    p.add_argument("--background", action="store_true"); p.set_defaults(fn=cmd_reflect)
+    p = sp.add_parser("digest", help="print the transcript digest for a session"); p.add_argument("session"); p.add_argument("--from-line", type=int, default=0); p.set_defaults(fn=cmd_digest)
+    p = sp.add_parser("sessions", help="list past sessions (recall)"); p.add_argument("--project"); p.add_argument("--limit", type=int, default=30); p.set_defaults(fn=cmd_sessions)
+    p = sp.add_parser("search", help="search past conversations (recall needle)"); p.add_argument("query"); p.add_argument("--project"); p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--role", default="all", choices=["all", "user", "assistant"]); p.add_argument("--regex", action="store_true"); p.add_argument("--since"); p.set_defaults(fn=cmd_search)
+    p = sp.add_parser("expand", help="show conversation around a hit (recall expand)"); p.add_argument("session"); p.add_argument("line", type=int)
+    p.add_argument("--before", type=int, default=3); p.add_argument("--after", type=int, default=3); p.set_defaults(fn=cmd_expand)
+    p = sp.add_parser("config", help="show/set config"); p.add_argument("--set", help="dotted.key=value"); p.set_defaults(fn=cmd_config)
+    p = sp.add_parser("sleeptime", help="configure reflection triggers"); p.add_argument("trigger", nargs="?"); p.add_argument("--step-count"); p.add_argument("--model"); p.set_defaults(fn=cmd_sleeptime)
+    p = sp.add_parser("open", help="open the vault in Obsidian"); p.set_defaults(fn=cmd_open)
+    p = sp.add_parser("backup", help="tar.gz backup of the vault"); p.add_argument("--dest"); p.set_defaults(fn=cmd_backup)
+    a = ap.parse_args()
+    a.fn(a)
+
+
+if __name__ == "__main__":
+    main()
