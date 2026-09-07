@@ -11,6 +11,8 @@ def main():
     if config.reflecting():
         return
     data = config.read_hook_input()
+    if data.get("agent_type"):
+        return  # subagents don't trigger reflection
     event = data.get("hook_event_name")
     cfg = config.load()["reflection"]
     trig = cfg.get("trigger", "compaction-event")

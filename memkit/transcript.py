@@ -95,7 +95,9 @@ def digest(path, from_line=0, max_bytes=350000):
     """Render a compact markdown digest. Returns (text, stats)."""
     out = []
     stats = {"user": 0, "assistant": 0, "tool_use": 0, "tool_result": 0, "summary": 0, "first_ts": None, "last_ts": None}
-    for m in iter_messages(path, from_line):
+    msgs = list(iter_messages(path, from_line))
+    last_assistant = max((i for i, m in enumerate(msgs) if m["kind"] == "assistant"), default=None)
+    for i, m in enumerate(msgs):
         stats[m["kind"]] = stats.get(m["kind"], 0) + 1
         stats["first_ts"] = stats["first_ts"] or m["ts"]
         stats["last_ts"] = m["ts"] or stats["last_ts"]
@@ -103,7 +105,8 @@ def digest(path, from_line=0, max_bytes=350000):
         if m["kind"] == "user":
             out.append(f"\n### [{m['line']}] USER @ {ts}\n{_short(m['text'], TRUNC_TEXT * 2)}")
         elif m["kind"] == "assistant":
-            out.append(f"\n### [{m['line']}] ASSISTANT @ {ts}\n{_short(m['text'], TRUNC_TEXT)}")
+            cap = TRUNC_TEXT * 6 if i == last_assistant else TRUNC_TEXT  # the closing summary is high-signal: keep it whole
+            out.append(f"\n### [{m['line']}] ASSISTANT @ {ts}\n{_short(m['text'], cap)}")
         elif m["kind"] == "tool_use":
             out.append(f"- [{m['line']}] → {m['tool']}: {m['text']}")
         elif m["kind"] == "tool_result":

@@ -31,8 +31,8 @@ def main():
         print("memory contract violation — fix the file (it stays uncommitted = not persisted):\n" +
               "\n".join(f"- {p}: {m}" for _, p, m in errors), file=sys.stderr)
         sys.exit(2)
-    if config.reflecting() or not config.load().get("autocommit", True):
-        return
+    if config.reflecting() or data.get("agent_type") == "memory-reflection" or not config.load().get("autocommit", True):
+        return  # the reflection agent commits once, itself, with trailers
     if gitops.is_repo():
         tool = data.get("tool_name", "Edit")
         sid = data.get("session_id", "")

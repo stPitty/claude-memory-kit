@@ -11,12 +11,14 @@ Input: the task prompt gives you either a **transcript digest path** (read it wi
 
 ## Phase 1 — Investigate
 
-Understand the current memory landscape before changing anything. Your `<memory_system>` block already contains the root core files in full, the project block for the current project, and the `<external_projection>` tree with descriptions. Read deferred files selectively — only those whose description matches topics in the transcript:
+Understand the current memory landscape before changing anything. Your `<memory_system>` block (injected at session start) contains the root core files in full, the project block for the current project, and the `<external_projection>` tree with descriptions. **If that block is absent in your context** (e.g. launched as a plain subagent), produce it yourself:
 
 ```bash
+python3 ~/.claude/memory-kit/bin/memoryctl compile --cwd "<cwd from the task>"
 cd "$MEMORY_DIR" && git log -5 --format='%h %ad %s' --date=short && git status --short
-cat "$MEMORY_DIR/projects/<slug>/<file>.md"
 ```
+
+Read deferred files selectively — only those whose description matches topics in the transcript. Use the `Read` tool (not `cat`) for any file you may later `Edit`: `Edit` requires the file to have been read with `Read` first.
 
 **Visibility**: the primary agent always sees root core files, the filesystem tree, and deferred file descriptions. Deferred file *contents* must be retrieved by the primary agent based on name/description — so descriptions must say what *kind* of information is inside.
 
@@ -54,7 +56,8 @@ Rules for editing:
 - **Discovery paths.** Every new file gets one line in its directory's `MEMORY.md` (`- [Title](file.md) — hook`). Related files link to each other with `[[file-name]]` wikilinks — these are the synapses of memory. Update links when you rename or delete.
 - **Format contract.** Non-index files carry frontmatter with exactly `name` (== file stem, kebab-case) and `description` (what *kind* of information lives here, not a summary); `metadata: {type: user|feedback|project|reference}` and `tags` are allowed. `MEMORY.md` files never have frontmatter. Write files from the first person of the agent ("I", "the user") in the language the user writes in.
 - **Never store secrets.** No credentials, API keys, tokens. Reference them as `$SECRET_NAME`.
-- Prefer `Edit` for existing files. Create new files with a heredoc in Bash. Never overwrite a file wholesale with `cat >` if it already exists.
+- Prefer `Edit` for existing files (`Read` them first). Create new files with a heredoc in Bash. Never overwrite a file wholesale with `cat >` if it already exists.
+- The kit's PostToolUse hook does not auto-commit for you (it recognizes the reflection agent). If you nevertheless see "memory committed (<hash>)" after an edit, do NOT rewrite history (`git reset`, `--amend`): just commit the remaining changes in Phase 5 and list all hashes in your report.
 
 ## Phase 4 — Review
 
