@@ -9,7 +9,7 @@ from pathlib import Path
 
 KIT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(KIT))
-from memkit import config, gitops, reflect, transcript, vault  # noqa: E402
+from memkit import config, gitops, mounts, reflect, transcript, vault  # noqa: E402
 
 
 def cmd_status(a):
@@ -179,6 +179,31 @@ def cmd_backup(a):
     print(out)
 
 
+def cmd_mount(a):
+    if a.action == "add":
+        only = [x.strip() for x in (a.only or "").split(",") if x.strip()]
+        e = mounts.add(a.source, name=a.name, read_only=not a.rw, auto_pull=not a.no_pull, only=only, subdir=a.subdir or "")
+        print("mounted:", json.dumps(e, ensure_ascii=False))
+        print(mounts.render_tree(mounts.all_mounts()[-1]))
+    elif a.action == "rm":
+        print("removed" if mounts.remove(a.source) else "no such mount")
+    elif a.action == "pull":
+        for m in mounts.all_mounts():
+            if a.source and m["name"] != a.source:
+                continue
+            print(f"{m['name']}: {mounts.pull(m)}")
+    else:  # list
+        ms = mounts.all_mounts()
+        if not ms:
+            print("no mounts. add one: memoryctl mount add <path-or-git-url> [--name N] [--rw] [--only 'courier-*,delivery-*']")
+        for m in ms:
+            st = mounts.status(m)
+            print(f"{m['name']:<20} {mounts.repo_root(m)}  ro={m.get('readOnly', True)} pull={m.get('autoPull', True)} "
+                  f"only={m.get('only') or '*'} rev={st['revision']} dirty={st['dirty']}")
+            if a.tree:
+                print(mounts.render_tree(m))
+
+
 def main():
     ap = argparse.ArgumentParser(prog="memoryctl", description=__doc__)
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -201,6 +226,11 @@ def main():
     p.add_argument("--before", type=int, default=3); p.add_argument("--after", type=int, default=3); p.set_defaults(fn=cmd_expand)
     p = sp.add_parser("config", help="show/set config"); p.add_argument("--set", help="dotted.key=value"); p.set_defaults(fn=cmd_config)
     p = sp.add_parser("sleeptime", help="configure reflection triggers"); p.add_argument("trigger", nargs="?"); p.add_argument("--step-count"); p.add_argument("--model"); p.set_defaults(fn=cmd_sleeptime)
+    p = sp.add_parser("mount", help="shared/external memory repos: add | rm | pull | list")
+    p.add_argument("action", nargs="?", default="list", choices=["add", "rm", "pull", "list"]); p.add_argument("source", nargs="?")
+    p.add_argument("--name"); p.add_argument("--rw", action="store_true", help="writable (default read-only)"); p.add_argument("--no-pull", action="store_true")
+    p.add_argument("--only", help="comma-separated project slug globs where the mount is visible"); p.add_argument("--subdir"); p.add_argument("--tree", action="store_true")
+    p.set_defaults(fn=cmd_mount)
     p = sp.add_parser("open", help="open the vault in Obsidian"); p.set_defaults(fn=cmd_open)
     p = sp.add_parser("backup", help="tar.gz backup of the vault"); p.add_argument("--dest"); p.set_defaults(fn=cmd_backup)
     a = ap.parse_args()

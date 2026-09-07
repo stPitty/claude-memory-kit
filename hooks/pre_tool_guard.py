@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from memkit import config, vault  # noqa: E402
+from memkit import config, mounts, vault  # noqa: E402
 
 
 def decide(decision, reason):
@@ -19,6 +19,13 @@ def main():
     path = ti.get("file_path") or ti.get("notebook_path")
     if not path:
         return
+    hit = mounts.find(path)
+    if hit is not None:
+        m, mrel = hit
+        if m.get("readOnly", True):
+            return decide("deny", f"memory: {mrel} belongs to the read-only shared mount '{m['name']}' ({mounts.repo_root(m)}). "
+                                  f"Do not edit it; if the change is yours, record it in your own vault instead (or ask the owner).")
+        return decide("allow", f"shared memory mount '{m['name']}' edit (auto-committed in that repository)")
     rel = config.in_vault(path)
     if rel is None:
         return

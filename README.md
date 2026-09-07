@@ -25,6 +25,7 @@
 | `letta memory status/tokens/diff/backup` | `memoryctl status / tokens / diff / backup / log / validate` |
 | Pre-commit валидация MemFS | git-хук `pre-commit` в vault'е (`memoryctl validate`) |
 | Импорт истории (`trajectories`) | `/memory-init` + параллельные агенты `memory-history-analyzer` |
+| Shared memory (`letta shared-memory attach`) | `memoryctl mount add <path|url>` — внешние git-репозитории с памятью, в контексте только дерево, содержимое по запросу |
 
 ## Требования
 
@@ -153,6 +154,7 @@ memoryctl status | compile [--cwd DIR] | tokens | validate | log | diff | commit
 memoryctl reflect [--session ID | --latest] [--force] [--background] [--model sonnet]
 memoryctl sessions | search "text" [--role user] [--project slug] [--since 2026-08-01] | expand ID LINE | digest ID
 memoryctl config [--set reflection.model=opus] | sleeptime both --step-count 25 | open | backup
+memoryctl mount add <path|url> [--name N] [--rw] [--only 'glob,glob'] | list [--tree] | pull [name] | rm <name>
 ```
 
 ## Obsidian
@@ -165,6 +167,22 @@ memoryctl config [--set reflection.model=opus] | sleeptime both --step-count 25 
   Правки подхватит и закоммитит ближайший `SessionStart` в Claude Code (коммит `chore(manual): …`), либо `memoryctl commit`.
 - Рекомендуемые community-плагины: **Obsidian Git** (история и diff прямо в Obsidian), **Dataview** (таблицы по `type`), **Properties**.
 - Не создавать заметки без frontmatter и папки без `MEMORY.md` — `memoryctl validate` покажет, что агент их «не видит».
+
+## Внешняя (shared) память — mounts
+
+Чужой или командный git-репозиторий с памятью можно **подключить, не загружая в свою память**: в контекст попадает только дерево его Markdown-файлов с однострочными описаниями (frontmatter `description` или первый заголовок), а содержимое агент читает `Read`'ом, когда тема задачи совпадает. Аналог `shared-memory` в Letta.
+
+```bash
+memoryctl mount add git@gitlab.example.com:team/backend-memory.git          # клонирует в ~/.claude/memory-mounts/<name>
+memoryctl mount add ~/repos/colleague-memory --name kolya --only 'courier-*,delivery-*'   # локальный путь; виден только в этих проектах
+memoryctl mount add ~/repos/team-memory --rw                                # писать можно; коммиты идут в тот репозиторий
+memoryctl mount list --tree | pull [name] | rm <name>
+```
+
+- По умолчанию mount **read-only**: guard-хук запретит правку файлов внутри него, выводы пишутся в свой vault.
+- На старте сессии выполняется `git pull --ff-only` (`autoPull`), результат виден в атрибуте `sync=` и в `memory_metadata`; конфликты и грязные файлы репортятся, но не чинятся.
+- `--only` ограничивает видимость mount'а проектами (glob по slug), чтобы не тратить контекст там, где он не нужен. Размер дерева ограничен `maxEntries` (80) и `maxDepth` (3) — правится в `~/.claude/memory-config.json`, секция `mounts`.
+- Репозиторий не обязан соблюдать контракт vault'а: без frontmatter описанием станет первый `# заголовок` файла.
 
 ## Настройка — `~/.claude/memory-config.json`
 

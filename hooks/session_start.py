@@ -24,7 +24,7 @@ def main():
     if issues:
         notes.append(f"⚠ {len(issues)} contract error(s) in the vault — run `memoryctl validate` / /memory-doctor: " +
                      "; ".join(f"{p}: {m}" for _, p, m in issues[:5]))
-    text, stats = vault.compile_context(cwd, extra_notes=notes)
+    text, stats = vault.compile_context(cwd, extra_notes=notes, pull_mounts=not config.reflecting())
     out = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
     if stats["tokens"] > config.load()["budget"]["warnTokens"]:
         out["systemMessage"] = f"memory: core memory ~{stats['tokens']} tokens is over budget — consider /memory-doctor"

@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from memkit import config, gitops, vault  # noqa: E402
+from memkit import config, gitops, mounts, vault  # noqa: E402
 
 
 def main():
@@ -12,6 +12,17 @@ def main():
     ti = data.get("tool_input") or {}
     path = ti.get("file_path") or ti.get("notebook_path")
     if not path:
+        return
+    hit = mounts.find(path)
+    if hit is not None:
+        m, mrel = hit
+        if m.get("readOnly", True) or not config.load().get("autocommit", True):
+            return
+        rp = mounts.repo_root(m)
+        if gitops.is_repo(cwd=rp):
+            h = gitops.commit_all(f"memory({data.get('tool_name', 'edit').lower()}): {mrel}\n\nSession: {data.get('session_id', '')}\nGenerated-By: claude-memory-kit", cwd=rp)
+            if h:
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": f"shared mount '{m['name']}' committed ({h}): {mrel}. Push it yourself when ready: git -C {rp} push"}}, ensure_ascii=False))
         return
     rel = config.in_vault(path)
     if rel is None:

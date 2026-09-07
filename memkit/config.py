@@ -15,6 +15,7 @@ DEFAULTS = {
     "stateDir": "~/.claude/memory-state",
     "projectsDir": "~/.claude/projects",
     "autocommit": True,
+    "mounts": [],
     "reflection": {
         # off | step-count | compaction-event | both
         "trigger": "compaction-event",

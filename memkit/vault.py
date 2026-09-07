@@ -10,7 +10,7 @@ Layout contract (memfs-v2, ported from Letta):
 """
 import re
 from pathlib import Path
-from . import config, frontmatter, gitops
+from . import config, frontmatter, gitops, mounts
 
 INDEX = "MEMORY.md"
 ARCHIVE = "ARCHIVE.md"
@@ -155,7 +155,7 @@ def estimate_tokens(text):
     return len(text.encode("utf-8")) // bpt
 
 
-def compile_context(cwd=None, extra_notes=None):
+def compile_context(cwd=None, extra_notes=None, pull_mounts=False):
     """Compile the memory vault into a context block (Letta system-prompt-compilation analogue)."""
     cfg = config.load()
     v = config.vault()
@@ -204,6 +204,11 @@ def compile_context(cwd=None, extra_notes=None):
     parts.append("</external_projection>")
     parts.append("</memory>")
 
+    shared, shared_notes = mounts.compile_section(slug, do_pull=pull_mounts)
+    if shared:
+        parts.append(shared)
+    extra_notes = list(extra_notes or []) + shared_notes
+
     body_so_far = "\n".join(parts)
     tokens = estimate_tokens(body_so_far)
     target = cfg["budget"]["targetTokens"]
@@ -228,6 +233,9 @@ def compile_context(cwd=None, extra_notes=None):
     if st:
         meta.append(f"- Last reflection: {st}")
     meta.append(f"- Reflection trigger: {cfg['reflection']['trigger']} (stepCount={cfg['reflection']['stepCount']})")
+    am = mounts.active(slug)
+    if am or mounts.all_mounts():
+        meta.append(f"- Shared memory mounts: {len(am)} active for this project of {len(mounts.all_mounts())} configured (memoryctl mount list)")
     for n in (extra_notes or []):
         meta.append(f"- {n}")
     meta.append("</memory_metadata>")
