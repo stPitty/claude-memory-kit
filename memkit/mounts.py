@@ -115,7 +115,7 @@ def _md_count(d: Path):
 
 
 def _match_any(rel: str, globs):
-    return any(fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(rel + "/", g) for g in globs or [])
+    return any(fnmatch.fnmatch(rel, g) for g in globs or [])
 
 
 def render_tree(m, slug=None):
