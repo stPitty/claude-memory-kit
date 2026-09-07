@@ -115,6 +115,8 @@ def _md_count(d: Path):
 
 
 def _match_any(rel: str, globs):
+    if isinstance(globs, str):
+        globs = [globs]
     return any(fnmatch.fnmatch(rel, g) for g in globs or [])
 
 
@@ -269,8 +271,9 @@ def set_option(name, key, value):
             try:
                 value = _json.loads(value)
             except Exception:  # noqa: BLE001
-                if "," in str(value):
-                    value = [x.strip() for x in str(value).split(",") if x.strip()]
+                pass
+            if key in ("exclude", "collapse", "only") and isinstance(value, str):
+                value = [x.strip() for x in value.split(",") if x.strip()]
             m[key] = value
             config.save(cfg)
             return m
