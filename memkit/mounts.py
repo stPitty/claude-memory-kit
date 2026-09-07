@@ -135,7 +135,7 @@ def render_tree(m, slug=None):
     if not base.exists():
         return f"{base}/  (missing — run: memoryctl mount pull {m['name']})"
 
-    def walk(d: Path, prefix: str, depth: int):
+    def walk(d: Path, prefix: str, depth: int, in_focus: bool = False):
         try:
             entries = sorted(d.iterdir(), key=lambda p: (p.is_dir(), p.name.lower()))
         except Exception:  # noqa: BLE001
@@ -164,14 +164,15 @@ def render_tree(m, slug=None):
                 lines.append(f"{prefix}{branch}{p.name}" + (f" — {d_}" if d_ else ""))
             else:
                 relp = str(p.relative_to(base))
-                if _match_any(relp, coll) and not (focus and slug and p.name == slug):
+                is_focus = bool(focus and slug and p.name == slug)
+                if not in_focus and not is_focus and _match_any(relp, coll):
                     lines.append(f"{prefix}{branch}{p.name}/ ({_md_count(p)} md files, collapsed — open when working on '{p.name}')")
                     continue
                 if depth >= max_depth:
                     lines.append(f"{prefix}{branch}{p.name}/ …")
                     continue
                 lines.append(f"{prefix}{branch}{p.name}/")
-                walk(p, prefix + ext, depth + 1)
+                walk(p, prefix + ext, depth + 1, in_focus or is_focus)
 
     walk(base, "", 1)
     if budget["skipped"]:

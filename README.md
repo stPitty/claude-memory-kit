@@ -183,6 +183,11 @@ memoryctl mount list --tree | pull [name] | rm <name>
 - На старте сессии выполняется `git pull --ff-only` (`autoPull`), результат виден в атрибуте `sync=` и в `memory_metadata`; конфликты и грязные файлы репортятся, но не чинятся.
 - `--only` ограничивает видимость mount'а проектами (glob по slug), чтобы не тратить контекст там, где он не нужен. Размер дерева ограничен `maxEntries` (80) и `maxDepth` (3) — правится в `~/.claude/memory-config.json`, секция `mounts`.
 - Репозиторий не обязан соблюдать контракт vault'а: без frontmatter описанием станет первый `# заголовок` файла.
+- Экономия контекста для больших репозиториев (настройки через `memoryctl mount set <name> key=value`):
+  `exclude='system,skills'` — скрыть папки; `collapse='reference/*'` — показывать папки одной строкой с числом файлов;
+  `focus=true` (по умолчанию) — папка, чьё имя совпадает со slug текущего проекта, раскрывается полностью; `descMax=100` — длина описания.
+  Пример: память коллеги в раскладке Letta memfs-v1 (`system/`, `reference/<проект>/`, `skills/`) с `exclude='system,skills' collapse='reference/*'`
+  стоит ~300 токенов вне проекта и ~600–1500 внутри него вместо ~10 000 целиком.
 
 ## Настройка — `~/.claude/memory-config.json`
 
