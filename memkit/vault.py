@@ -150,6 +150,27 @@ def _block(tag, p: Path, body_only=False):
     return "\n".join(out)
 
 
+def chunk(text, size):
+    """Split text into pieces of at most `size` chars, on line boundaries where possible.
+    Claude Code caps each hook's injected output (~10k chars) and replaces anything larger with a
+    file pointer the agent never reads, so the compiled memory is delivered in several parts."""
+    out, cur = [], ""
+    for line in text.splitlines(keepends=True):
+        while len(line) > size:
+            if cur:
+                out.append(cur)
+                cur = ""
+            out.append(line[:size])
+            line = line[size:]
+        if len(cur) + len(line) > size:
+            out.append(cur)
+            cur = ""
+        cur += line
+    if cur:
+        out.append(cur)
+    return out
+
+
 def estimate_tokens(text):
     bpt = config.load()["budget"]["bytesPerToken"]
     return len(text.encode("utf-8")) // bpt

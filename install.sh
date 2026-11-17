@@ -123,8 +123,14 @@ vault_disp = vault.replace(home, "~", 1) if vault.startswith(home) else vault
 data["autoMemoryDirectory"] = vault_disp
 hooks = data.setdefault("hooks", {})
 def cmd(script): return f'python3 "{dest}/hooks/{script}"'
+PARTS = int(os.environ.get("MEMORY_HOOK_PARTS", "8"))
 wanted = {
-    "SessionStart": [{"matcher": "startup|resume|clear|compact", "hooks": [{"type": "command", "command": cmd("session_start.py"), "timeout": 60, "statusMessage": "Compiling memory"}]}],
+    # Claude Code caps each hook's injected output at ~10k chars, so the compiled memory is
+    # delivered by several instances of the same hook, each printing its own slice.
+    "SessionStart": [{"matcher": "startup|resume|clear|compact", "hooks": [
+        {"type": "command", "command": cmd("session_start.py") + f" --part {i} --parts {PARTS}", "timeout": 60,
+         **({"statusMessage": "Compiling memory"} if i == 0 else {})} for i in range(PARTS)]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": cmd("recall_on_prompt.py"), "timeout": 15}]}],
     "PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit", "hooks": [{"type": "command", "command": cmd("pre_tool_guard.py"), "timeout": 15}]}],
     "PostToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit", "hooks": [{"type": "command", "command": cmd("post_tool_commit.py"), "timeout": 30}]}],
     "PreCompact": [{"matcher": "manual|auto", "hooks": [{"type": "command", "command": cmd("reflect_trigger.py"), "timeout": 20, "async": True}]}],
